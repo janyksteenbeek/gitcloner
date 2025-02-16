@@ -67,6 +67,7 @@ Install Supervisor to run the service in the background. More info [here](https:
 - `DESTINATION_TOKEN`: API token with repository creation permissions
 - `DESTINATION_ORG`: The organization/owner name where mirrors will be created
 - `SOURCE_TOKEN`: Token for accessing private source repositories
+- `ALWAYS_PUSH`: Whether to push to the destination even if the mirror already exists. By default, this is ommited.
 
 ### Private Access Tokens
 
