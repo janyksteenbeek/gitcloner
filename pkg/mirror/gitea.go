@@ -14,7 +14,7 @@ type giteaMirrorService struct {
 
 // NewGiteaMirrorService creates a new Gitea mirror service
 func NewGiteaMirrorService(config Config) (MirrorService, error) {
-	if config.URL == "" || config.Token == "" || config.OrgID == "" {
+	if config.URL == "" || config.Token == "" {
 		return nil, ErrInvalidConfig
 	}
 
@@ -29,9 +29,31 @@ func NewGiteaMirrorService(config Config) (MirrorService, error) {
 	}, nil
 }
 
+// getCurrentUser gets the current authenticated user
+func (s *giteaMirrorService) getCurrentUser() (string, error) {
+	user, _, err := s.client.GetMyUserInfo()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current user: %v", err)
+	}
+	return user.UserName, nil
+}
+
+// getOwner returns the owner (organization or user) for repository operations
+func (s *giteaMirrorService) getOwner() (string, error) {
+	if s.config.OrgID != "" {
+		return s.config.OrgID, nil
+	}
+	return s.getCurrentUser()
+}
+
 // getRepo safely gets a repository and handles 404 errors
 func (s *giteaMirrorService) getRepo(name string) (*gitea.Repository, error) {
-	repo, resp, err := s.client.GetRepo(s.config.OrgID, name)
+	owner, err := s.getOwner()
+	if err != nil {
+		return nil, err
+	}
+
+	repo, resp, err := s.client.GetRepo(owner, name)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
 			return nil, nil
@@ -56,13 +78,18 @@ func (s *giteaMirrorService) CheckRepository(repo Repository) (exists bool, isMi
 }
 
 func (s *giteaMirrorService) UpdateRepository(repo Repository) error {
+	owner, err := s.getOwner()
+	if err != nil {
+		return err
+	}
+
 	log.Printf("Updating repository %s description", repo.Name)
 
 	updateOpts := gitea.EditRepoOption{
 		Description: &repo.Description,
 	}
 
-	_, _, err := s.client.EditRepo(s.config.OrgID, repo.Name, updateOpts)
+	_, _, err = s.client.EditRepo(owner, repo.Name, updateOpts)
 	if err != nil {
 		return fmt.Errorf("failed to update repository: %v", err)
 	}
@@ -93,12 +120,17 @@ func (s *giteaMirrorService) CreateMirror(repo Repository) error {
 		return nil
 	}
 
-	log.Printf("Creating mirror for %s, %s [ %s ]", repo.Name, repo.CloneURL, s.config.OrgID)
+	owner, err := s.getOwner()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrMirrorCreationFailed, err)
+	}
+
+	log.Printf("Creating mirror for %s, %s [ %s ]", repo.Name, repo.CloneURL, owner)
 
 	// Set up mirroring using the migration API
 	migrationOpts := gitea.MigrateRepoOption{
 		RepoName:       repo.Name,
-		RepoOwner:      s.config.OrgID,
+		RepoOwner:      owner,
 		CloneAddr:      repo.CloneURL,
 		Mirror:         true,
 		Private:        repo.Private,
@@ -117,6 +149,11 @@ func (s *giteaMirrorService) CreateMirror(repo Repository) error {
 }
 
 func (s *giteaMirrorService) SyncRepository(repo Repository) error {
+	owner, err := s.getOwner()
+	if err != nil {
+		return fmt.Errorf("failed to get owner: %v", err)
+	}
+
 	log.Printf("Syncing mirror for %s", repo.Name)
 
 	// Get the repository
@@ -130,7 +167,7 @@ func (s *giteaMirrorService) SyncRepository(repo Repository) error {
 	}
 
 	// Trigger a mirror sync
-	_, err = s.client.MirrorSync(s.config.OrgID, giteaRepo.Name)
+	_, err = s.client.MirrorSync(owner, giteaRepo.Name)
 	if err != nil {
 		return fmt.Errorf("failed to trigger mirror sync: %v", err)
 	}

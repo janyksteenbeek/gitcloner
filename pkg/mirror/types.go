@@ -46,13 +46,17 @@ func (r *Repository) GetAuthenticatedCloneURL(sourceToken string) (string, error
 type Config struct {
 	URL         string
 	Token       string
-	OrgID       string
+	OrgID       string // Can be empty for personal accounts
 	Type        string
 	SourceToken string // Token used for authenticating with source repositories
 }
 
 // NewMirrorService creates a new mirror service based on the configuration
 func NewMirrorService(config Config) (MirrorService, error) {
+	if config.URL == "" || config.Token == "" {
+		return nil, ErrInvalidConfig
+	}
+
 	switch config.Type {
 	case "gitea":
 		return NewGiteaMirrorService(config)

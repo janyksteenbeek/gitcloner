@@ -3,7 +3,6 @@ package mirror
 import (
 	"fmt"
 	"log"
-	"net/url"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
@@ -15,7 +14,7 @@ type gitlabMirrorService struct {
 
 // NewGitlabMirrorService creates a new GitLab mirror service
 func NewGitlabMirrorService(config Config) (MirrorService, error) {
-	if config.URL == "" || config.Token == "" || config.OrgID == "" {
+	if config.URL == "" || config.Token == "" {
 		return nil, ErrInvalidConfig
 	}
 
@@ -30,19 +29,67 @@ func NewGitlabMirrorService(config Config) (MirrorService, error) {
 	}, nil
 }
 
-// findProject finds a project by name in the group and returns its ID
-func (s *gitlabMirrorService) findProject(name string) (*gitlab.Project, error) {
-	listOpts := &gitlab.ListGroupProjectsOptions{
-		Search: gitlab.Ptr(name),
-	}
-	projects, _, err := s.client.Groups.ListGroupProjects(s.config.OrgID, listOpts)
+// getCurrentUser gets the current authenticated user
+func (s *gitlabMirrorService) getCurrentUser() (string, error) {
+	user, _, err := s.client.Users.CurrentUser()
 	if err != nil {
-		return nil, fmt.Errorf("failed to find project: %v", err)
+		return "", fmt.Errorf("failed to get current user: %v", err)
+	}
+	return user.Username, nil
+}
+
+// getOwner returns the owner (organization or user) for repository operations
+func (s *gitlabMirrorService) getOwner() (string, error) {
+	if s.config.OrgID != "" {
+		return s.config.OrgID, nil
+	}
+	return s.getCurrentUser()
+}
+
+// verifyGroup verifies that the group exists if OrgID is provided
+func (s *gitlabMirrorService) verifyGroup() error {
+	if s.config.OrgID == "" {
+		return nil
 	}
 
-	for _, p := range projects {
-		if p.Name == name {
-			return p, nil
+	_, _, err := s.client.Groups.GetGroup(s.config.OrgID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get group: %v", err)
+	}
+	return nil
+}
+
+// findProject finds a project by name in the group/user namespace and returns its ID
+func (s *gitlabMirrorService) findProject(name string) (*gitlab.Project, error) {
+	if s.config.OrgID != "" {
+		// Search in group projects
+		listOpts := &gitlab.ListGroupProjectsOptions{
+			Search: gitlab.Ptr(name),
+		}
+		projects, _, err := s.client.Groups.ListGroupProjects(s.config.OrgID, listOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find project in group: %v", err)
+		}
+
+		for _, p := range projects {
+			if p.Name == name {
+				return p, nil
+			}
+		}
+	} else {
+		// Search in user projects
+		listOpts := &gitlab.ListProjectsOptions{
+			Search: gitlab.Ptr(name),
+		}
+		projects, _, err := s.client.Projects.ListProjects(listOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find project: %v", err)
+		}
+
+		for _, p := range projects {
+			if p.Name == name {
+				return p, nil
+			}
 		}
 	}
 
@@ -50,10 +97,8 @@ func (s *gitlabMirrorService) findProject(name string) (*gitlab.Project, error) 
 }
 
 func (s *gitlabMirrorService) CheckRepository(repo Repository) (exists bool, isMirror bool, needsUpdate bool, err error) {
-	// Get group ID by path
-	_, _, err = s.client.Groups.GetGroup(s.config.OrgID, nil)
-	if err != nil {
-		return false, false, false, fmt.Errorf("failed to get group: %v", err)
+	if err := s.verifyGroup(); err != nil {
+		return false, false, false, err
 	}
 
 	project, err := s.findProject(repo.Name)
@@ -117,13 +162,12 @@ func (s *gitlabMirrorService) CreateMirror(repo Repository) error {
 		return nil
 	}
 
-	log.Printf("Creating mirror for %s, %s [ %s ]", repo.Name, repo.CloneURL, s.config.OrgID)
-
-	// Get group ID by path
-	group, _, err := s.client.Groups.GetGroup(s.config.OrgID, nil)
+	owner, err := s.getOwner()
 	if err != nil {
-		return fmt.Errorf("%w: failed to get group: %v", ErrMirrorCreationFailed, err)
+		return fmt.Errorf("%w: %v", ErrMirrorCreationFailed, err)
 	}
+
+	log.Printf("Creating mirror for %s, %s [ %s ]", repo.Name, repo.CloneURL, owner)
 
 	// Get authenticated clone URL if needed
 	cloneURL, err := repo.GetAuthenticatedCloneURL(s.config.SourceToken)
@@ -135,11 +179,19 @@ func (s *gitlabMirrorService) CreateMirror(repo Repository) error {
 	opts := &gitlab.CreateProjectOptions{
 		Name:                gitlab.Ptr(repo.Name),
 		Description:         gitlab.Ptr(repo.Description),
-		NamespaceID:         &group.ID,
-		Visibility:          visibilityLevel(repo.Private),
 		ImportURL:           gitlab.Ptr(cloneURL),
 		Mirror:              gitlab.Ptr(true),
 		MirrorTriggerBuilds: gitlab.Ptr(true),
+		Visibility:          visibilityLevel(repo.Private),
+	}
+
+	// Set namespace if using organization
+	if s.config.OrgID != "" {
+		group, _, err := s.client.Groups.GetGroup(s.config.OrgID, nil)
+		if err != nil {
+			return fmt.Errorf("%w: failed to get group: %v", ErrMirrorCreationFailed, err)
+		}
+		opts.NamespaceID = &group.ID
 	}
 
 	// Create the project
@@ -193,13 +245,4 @@ func visibilityLevel(private bool) *gitlab.VisibilityValue {
 		return gitlab.Ptr(gitlab.PrivateVisibility)
 	}
 	return gitlab.Ptr(gitlab.PublicVisibility)
-}
-
-func addAuthToURL(cloneURL, username, token string) (string, error) {
-	parsedURL, err := url.Parse(cloneURL)
-	if err != nil {
-		return "", err
-	}
-	parsedURL.User = url.UserPassword(username, token)
-	return parsedURL.String(), nil
 }

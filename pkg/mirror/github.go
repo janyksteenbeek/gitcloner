@@ -17,7 +17,7 @@ type githubMirrorService struct {
 
 // NewGithubMirrorService creates a new GitHub mirror service
 func NewGithubMirrorService(config Config) (MirrorService, error) {
-	if config.URL == "" || config.Token == "" || config.OrgID == "" {
+	if config.URL == "" || config.Token == "" {
 		return nil, ErrInvalidConfig
 	}
 
@@ -35,6 +35,40 @@ func NewGithubMirrorService(config Config) (MirrorService, error) {
 	}, nil
 }
 
+// getCurrentUser gets the current authenticated user
+func (s *githubMirrorService) getCurrentUser() (string, error) {
+	user, _, err := s.client.Users.Get(s.ctx, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to get current user: %v", err)
+	}
+	return *user.Login, nil
+}
+
+// getOwner returns the owner (organization or user) for repository operations
+func (s *githubMirrorService) getOwner() (string, error) {
+	if s.config.OrgID != "" {
+		return s.config.OrgID, nil
+	}
+	return s.getCurrentUser()
+}
+
+// getRepo safely gets a repository and handles 404 errors
+func (s *githubMirrorService) getRepo(name string) (*github.Repository, error) {
+	owner, err := s.getOwner()
+	if err != nil {
+		return nil, err
+	}
+
+	repo, resp, err := s.client.Repositories.Get(s.ctx, owner, name)
+	if err != nil {
+		if resp != nil && resp.StatusCode == 404 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get repository: %v", err)
+	}
+	return repo, nil
+}
+
 // getDescription safely gets the description from a GitHub repository
 func getDescription(repo *github.Repository) string {
 	if repo != nil && repo.Description != nil {
@@ -44,29 +78,32 @@ func getDescription(repo *github.Repository) string {
 }
 
 func (s *githubMirrorService) CheckRepository(repo Repository) (exists bool, isMirror bool, needsUpdate bool, err error) {
-	existingRepo, resp, err := s.client.Repositories.Get(s.ctx, s.config.OrgID, repo.Name)
-	if err == nil && existingRepo != nil {
+	existingRepo, err := s.getRepo(repo.Name)
+	if err != nil {
+		return false, false, false, err
+	}
+
+	if existingRepo != nil {
 		needsUpdate = getDescription(existingRepo) != repo.Description
 		return true, existingRepo.MirrorURL != nil, needsUpdate, nil
 	}
 
-	// Check if it's a 404 (not found) error
-	if resp != nil && resp.StatusCode == 404 {
-		return false, false, false, nil
-	}
-
-	// Unexpected error
-	return false, false, false, fmt.Errorf("failed to check repository: %v", err)
+	return false, false, false, nil
 }
 
 func (s *githubMirrorService) UpdateRepository(repo Repository) error {
+	owner, err := s.getOwner()
+	if err != nil {
+		return err
+	}
+
 	log.Printf("Updating repository %s description", repo.Name)
 
 	updateRepo := &github.Repository{
 		Description: &repo.Description,
 	}
 
-	_, _, err := s.client.Repositories.Edit(s.ctx, s.config.OrgID, repo.Name, updateRepo)
+	_, _, err = s.client.Repositories.Edit(s.ctx, owner, repo.Name, updateRepo)
 	if err != nil {
 		return fmt.Errorf("failed to update repository: %v", err)
 	}
@@ -98,16 +135,25 @@ func (s *githubMirrorService) CreateMirror(repo Repository) error {
 		return nil
 	}
 
-	log.Printf("Creating mirror for %s, %s [ %s ]", repo.Name, repo.CloneURL, s.config.OrgID)
+	owner, err := s.getOwner()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrMirrorCreationFailed, err)
+	}
 
-	// Create a new repository in GitHub
+	log.Printf("Creating mirror for %s, %s [ %s ]", repo.Name, repo.CloneURL, owner)
+
+	// Create a new repository
 	newRepo := &github.Repository{
 		Name:        &repo.Name,
 		Description: &repo.Description,
 		Private:     &repo.Private,
 	}
 
-	_, _, err = s.client.Repositories.Create(s.ctx, s.config.OrgID, newRepo)
+	if s.config.OrgID != "" {
+		_, _, err = s.client.Repositories.Create(s.ctx, owner, newRepo)
+	} else {
+		_, _, err = s.client.Repositories.Create(s.ctx, "", newRepo)
+	}
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrMirrorCreationFailed, err)
 	}
@@ -116,7 +162,7 @@ func (s *githubMirrorService) CreateMirror(repo Repository) error {
 	cloneURL, err := repo.GetAuthenticatedCloneURL(s.config.SourceToken)
 	if err != nil {
 		// Clean up the created repository
-		_, _ = s.client.Repositories.Delete(s.ctx, s.config.OrgID, repo.Name)
+		_, _ = s.client.Repositories.Delete(s.ctx, owner, repo.Name)
 		return err
 	}
 
@@ -125,10 +171,10 @@ func (s *githubMirrorService) CreateMirror(repo Repository) error {
 		MirrorURL: &cloneURL,
 	}
 
-	_, _, err = s.client.Repositories.Edit(s.ctx, s.config.OrgID, repo.Name, mirrorConfig)
+	_, _, err = s.client.Repositories.Edit(s.ctx, owner, repo.Name, mirrorConfig)
 	if err != nil {
 		// Clean up the created repository
-		_, _ = s.client.Repositories.Delete(s.ctx, s.config.OrgID, repo.Name)
+		_, _ = s.client.Repositories.Delete(s.ctx, owner, repo.Name)
 		return fmt.Errorf("%w: %v", ErrMirrorCreationFailed, err)
 	}
 
@@ -136,10 +182,15 @@ func (s *githubMirrorService) CreateMirror(repo Repository) error {
 }
 
 func (s *githubMirrorService) SyncRepository(repo Repository) error {
+	owner, err := s.getOwner()
+	if err != nil {
+		return fmt.Errorf("failed to get owner: %v", err)
+	}
+
 	log.Printf("Syncing mirror for %s", repo.Name)
 
 	eventType := "sync_mirror"
-	_, _, err := s.client.Repositories.Dispatch(s.ctx, s.config.OrgID, repo.Name, github.DispatchRequestOptions{
+	_, _, err = s.client.Repositories.Dispatch(s.ctx, owner, repo.Name, github.DispatchRequestOptions{
 		EventType: eventType,
 	})
 	if err != nil {
