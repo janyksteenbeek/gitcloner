@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitcloner
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitcloner-secrets
+  namespace: gitcloner
+type: Opaque
+stringData:
+  DESTINATION_TYPE: "gitea"
+  DESTINATION_URL: "https://gitea.example.com"
+  DESTINATION_TOKEN: "your-token-here"
+  DESTINATION_ORG: "your-org-here"
+  SOURCE_TOKEN: "your-source-token"  # Required for private repositories
+  ALWAYS_PUSH: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitcloner
+  namespace: gitcloner
+  labels:
+    app: gitcloner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitcloner
+  template:
+    metadata:
+      labels:
+        app: gitcloner
+    spec:
+      containers:
+      - name: gitcloner
+        image: ghcr.io/janyksteenbeek/gitcloner:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - secretRef:
+            name: gitcloner-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        readinessProbe:
+          httpGet:
+            path: /webhook
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /webhook
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitcloner
+  namespace: gitcloner
+  labels:
+    app: gitcloner
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: gitcloner
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitcloner
+  namespace: gitcloner
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: gitcloner.example.com  # Replace with your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: gitcloner
+            port:
+              number: 80 
