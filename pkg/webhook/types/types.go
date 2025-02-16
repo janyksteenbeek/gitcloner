@@ -70,13 +70,14 @@ type GitHubWebhookPayload struct {
 type GitLabWebhookPayload struct {
 	EventType  string `json:"event_type"`
 	ObjectKind string `json:"object_kind"`
+	Ref        string `json:"ref,omitempty"`
 	Project    struct {
+		ID                int64  `json:"id"`
 		Name              string `json:"name"`
 		Description       string `json:"description"`
-		Visibility        string `json:"visibility"`
-		DefaultBranch     string `json:"default_branch"`
 		GitHTTPURL        string `json:"git_http_url"`
+		VisibilityLevel   int    `json:"visibility_level"`
 		PathWithNamespace string `json:"path_with_namespace"`
+		DefaultBranch     string `json:"default_branch"`
 	} `json:"project"`
-	Ref string `json:"ref"`
 }

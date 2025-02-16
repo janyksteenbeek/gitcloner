@@ -25,7 +25,7 @@ func (h *Handler) handleGitLabWebhook(r *http.Request) error {
 		repo := mirror.Repository{
 			Name:        formatRepoName(getOwnerFromPath(payload.Project.PathWithNamespace), payload.Project.Name),
 			Description: payload.Project.Description,
-			Private:     payload.Project.Visibility != "public",
+			Private:     payload.Project.VisibilityLevel < 20,
 			CloneURL:    payload.Project.GitHTTPURL,
 			Owner:       getOwnerFromPath(payload.Project.PathWithNamespace),
 		}
@@ -35,7 +35,7 @@ func (h *Handler) handleGitLabWebhook(r *http.Request) error {
 			repo := mirror.Repository{
 				Name:        formatRepoName(getOwnerFromPath(payload.Project.PathWithNamespace), payload.Project.Name),
 				Description: payload.Project.Description,
-				Private:     payload.Project.Visibility != "public",
+				Private:     payload.Project.VisibilityLevel < 20,
 				CloneURL:    payload.Project.GitHTTPURL,
 				Owner:       getOwnerFromPath(payload.Project.PathWithNamespace),
 			}
