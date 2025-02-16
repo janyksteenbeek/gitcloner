@@ -13,17 +13,57 @@ type GiteaWebhookPayload struct {
 // GitHubWebhookPayload represents a GitHub webhook payload
 type GitHubWebhookPayload struct {
 	Action     string `json:"action"`
+	Ref        string `json:"ref,omitempty"`
+	Before     string `json:"before,omitempty"`
+	After      string `json:"after,omitempty"`
+	Created    bool   `json:"created,omitempty"`
+	Deleted    bool   `json:"deleted,omitempty"`
+	Forced     bool   `json:"forced,omitempty"`
 	Repository struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Private     bool   `json:"private"`
-		CloneURL    string `json:"clone_url"`
-		Owner       struct {
-			Login string `json:"login"`
-		} `json:"owner"`
+		ID            int64  `json:"id"`
+		Name          string `json:"name"`
+		FullName      string `json:"full_name"`
+		Description   string `json:"description"`
+		Private       bool   `json:"private"`
+		Fork          bool   `json:"fork"`
 		DefaultBranch string `json:"default_branch"`
+		CloneURL      string `json:"clone_url"`
+		SSHURL        string `json:"ssh_url"`
+		GitURL        string `json:"git_url"`
+		HTMLURL       string `json:"html_url"`
+		Visibility    string `json:"visibility"`
+		Owner         struct {
+			Name      string `json:"name,omitempty"`
+			Email     string `json:"email,omitempty"`
+			Login     string `json:"login"`
+			ID        int64  `json:"id"`
+			AvatarURL string `json:"avatar_url"`
+			Type      string `json:"type"`
+		} `json:"owner"`
+		Organization struct {
+			Login     string `json:"login"`
+			ID        int64  `json:"id"`
+			AvatarURL string `json:"avatar_url"`
+		} `json:"organization,omitempty"`
 	} `json:"repository"`
-	Ref string `json:"ref"`
+	Organization struct {
+		Login       string `json:"login"`
+		ID          int64  `json:"id"`
+		NodeID      string `json:"node_id"`
+		URL         string `json:"url"`
+		AvatarURL   string `json:"avatar_url"`
+		Description string `json:"description"`
+	} `json:"organization,omitempty"`
+	Pusher struct {
+		Name  string `json:"name,omitempty"`
+		Email string `json:"email,omitempty"`
+	} `json:"pusher,omitempty"`
+	Sender struct {
+		Login     string `json:"login"`
+		ID        int64  `json:"id"`
+		AvatarURL string `json:"avatar_url"`
+		Type      string `json:"type"`
+	} `json:"sender"`
 }
 
 // GitLabWebhookPayload represents a GitLab webhook payload
