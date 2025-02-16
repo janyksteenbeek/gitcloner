@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,10 @@ func main() {
 		log.Printf("Warning: .env file not found: %v", err)
 	}
 
+	// Parse command line flags
+	importRepos := flag.String("import", "", "Platform and repository to import (e.g., 'github username/repo')")
+	flag.Parse()
+
 	config := mirror.Config{
 		Type:        os.Getenv("DESTINATION_TYPE"),
 		URL:         os.Getenv("DESTINATION_URL"),
@@ -24,6 +29,15 @@ func main() {
 		SourceToken: os.Getenv("SOURCE_TOKEN"),
 	}
 
+	// Handle one-time imports if specified
+	if *importRepos != "" {
+		if err := mirror.HandleImport(config, *importRepos); err != nil {
+			log.Fatalf("Failed to import repository: %v", err)
+		}
+		return
+	}
+
+	// Start webhook server
 	log.Printf("type: %s", config.Type)
 	log.Printf("url: %s", config.URL)
 	log.Printf("orgID: %s", config.OrgID)

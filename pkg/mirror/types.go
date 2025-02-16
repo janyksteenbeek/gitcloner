@@ -3,6 +3,7 @@ package mirror
 import (
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // MirrorService defines the interface for repository mirroring
@@ -67,4 +68,33 @@ func NewMirrorService(config Config) (MirrorService, error) {
 	default:
 		return nil, ErrUnsupportedProvider
 	}
+}
+
+// ParseRepositoryURL parses a repository URL and returns a Repository struct
+func ParseRepositoryURL(repoURL string) (Repository, error) {
+	parsedURL, err := url.Parse(repoURL)
+	if err != nil {
+		return Repository{}, fmt.Errorf("%w: %v", ErrInvalidCloneURL, err)
+	}
+
+	// Extract owner and name from path
+	path := strings.Trim(parsedURL.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		return Repository{}, fmt.Errorf("%w: invalid repository path", ErrInvalidCloneURL)
+	}
+
+	owner := parts[0]
+	name := strings.TrimSuffix(parts[1], ".git")
+
+	// Determine if repository is private based on URL scheme
+	// This is a best guess, the actual privacy status will be determined when creating the mirror
+	private := parsedURL.Scheme == "git+ssh" || parsedURL.Scheme == "ssh"
+
+	return Repository{
+		Name:     name,
+		Owner:    owner,
+		CloneURL: repoURL,
+		Private:  private,
+	}, nil
 }

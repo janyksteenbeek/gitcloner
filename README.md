@@ -8,6 +8,7 @@ By hooking Gitcloner as a global webhook into your source provider, it will star
 
 - Automatically creates mirror repositories when new repositories are created
 - Syncs repositories on push events to the default branch
+- One-time import of repositories using the CLI
 - Supports mirroring to:
   - Gitea
   - GitHub
@@ -17,6 +18,15 @@ By hooking Gitcloner as a global webhook into your source provider, it will star
 - Docker support for easy deployment
 - Automatically updates mirrors when the original repository is updated
 
+## Usage
+
+### Webhook Server
+
+The default mode runs a webhook server that listens for repository events and automatically creates/updates mirrors.
+
+```bash
+./gitcloner
+```
 ## Deployment Options
 
 ### Using Docker (Recommended)
@@ -69,45 +79,48 @@ Install Supervisor to run the service in the background. More info [here](https:
 - `SOURCE_TOKEN`: Token for accessing private source repositories
 - `ALWAYS_PUSH`: Whether to push to the destination even if the mirror already exists. By default, this is ommited.
 
-### Private Access Tokens
-
-For private repositories, you need to set the `SOURCE_TOKEN` environment variable. This token needs to have access to the private repositories you want to mirror.
-
-Make sure the token has the necessary permissions for the source provider. Read more about the permissions needed in the documentation of the source provider. Most of the times, it's just a matter of read/write access to the repositories and organizations & users scopes.
-
 ### Webhook Configuration
 
 #### Gitea
-1. In your source Gitea instance, go to your organization's settings
-2. Navigate to Webhooks > Add Webhook > Gitea
-3. Set the following:
-   - Target URL: `http://your-server:8080/webhook`
-   - HTTP Method: POST
-   - Trigger On: Repository Events and Push Events
-   - Branch filter: * (or your default branch)
-   - Select events:
-     - Repository Created
-     - Push
+In Gitea organization settings, add a Gitea webhook with:
+- URL: `http://your-server:8080/webhook`
+- Method: POST 
+- Events: Repository Created, Push
+- Branch filter: *
 
 #### GitHub
-1. In your source GitHub organization, go to Settings > Webhooks
-2. Click "Add webhook"
-3. Set the following:
-   - Payload URL: `http://your-server:8080/webhook`
-   - Content type: `application/json`
-   - Secret: _(optional, not yet supported)_
-   - Events:
-     - Repository
-     - Push
+In GitHub organization settings, add webhook with:
+- URL: `http://your-server:8080/webhook`
+- Content type: `application/json`
+- Events: Repository, Push
 
 #### GitLab
-1. In your source GitLab group, go to Settings > Webhooks
-2. Set the following:
-   - URL: `http://your-server:8080/webhook`
-   - Trigger:
-     - Project events
-     - Push events
-   - SSL verification: (according to your setup)
+In GitLab group settings, add webhook with:
+- URL: `http://your-server:8080/webhook`
+- Triggers: Project events, Push events
+- SSL verification: Optional
+
+## One-time Import
+
+You can use Gitcloner to import one or more repositories using the CLI:
+
+```bash
+# Mirror multiple GitHub repositories
+./gitcloner --import "github octocat/Hello-World,golang/go,kubernetes/kubernetes"
+
+# Mirror a GitLab repository
+./gitcloner --import "gitlab gitlab-org/gitlab"
+```
+
+The import command requires:
+1. The `--import` flag
+1. Platform name (`github`, `gitlab`, or `gitea`)
+3. One or more repository paths in `username/repo` format, separated by commas
+
+Note: When importing multiple repositories, if one import fails, the process will continue with the remaining repositories.
+
+Make sure you have valid environment variables in the `.env` file
+
 
 ## Repository Naming
 
@@ -116,12 +129,12 @@ Example:
 - Original: `janyksteenbeek/myrepo`
 - Mirrored: `yourbackuporg/janyksteenbeek-myrepo`
 
-## Private Repositories
+### Private Access Tokens
 
-For private repositories, ensure you:
-1. Set the `SOURCE_TOKEN` environment variable
-2. Use a token with sufficient permissions in both source and destination
+For private repositories, you need to set the `SOURCE_TOKEN` environment variable. This token needs to have access to the private repositories you want to mirror.
+
+Make sure the token has the necessary permissions for the source provider. Read more about the permissions needed in the documentation of the source provider. Most of the times, it's just a matter of read/write access to the repositories and organizations & users scopes.
 
 ## License
 
-Licensed under the MIT License. See the [LICENSE file](LICENSE) for details.
+Licensed under the MIT License.
